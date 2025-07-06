@@ -1,30 +1,29 @@
 import argparse
 import warnings
 
+import joblib
 import mlflow
 import pandas as pd
-import prefect
 import xgboost as xgb
+from prefect import flow, task
 from sklearn.metrics import root_mean_squared_error
 from sklearn.preprocessing import OneHotEncoder
 
 warnings.filterwarnings("ignore")
 
-mlflow.set_tracking_uri("http://localhost:5000")
-mlflow.set_experiment("nyc-taxi-experiment")
-
-
+@task
 def read_dataframe(year, month):
 	url = f'https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_{year}-{month:02d}.parquet'
 	df = pd.read_parquet(url).sample(frac=0.01, random_state=42)
-	
+
 	print("Records:", df.shape[0] * 100)
 
-	df['duration'] = (df['lpep_dropoff_datetime'] - df['lpep_pickup_datetime']).dt.total_seconds() / 60
+	df['duration'] = (df['tpep_dropoff_datetime'] - df['tpep_pickup_datetime']).dt.total_seconds() / 60
 	df = df.loc[(df['duration'] >= 1) & (df['duration'] <= 60)]
 
 	return df
 
+@task
 def preprocessing(df):
 	encoder = OneHotEncoder(drop='first', handle_unknown='ignore')
 	df_encoded = encoder.fit_transform(df[['PULocationID', 'DOLocationID']])
@@ -33,6 +32,7 @@ def preprocessing(df):
 
 	return X, y, encoder
 
+@task
 def train_model(X_train, y_train, X_val, y_val, encoder):
 	with mlflow.start_run() as run:
 		train = xgb.DMatrix(X_train, label=y_train)
@@ -58,18 +58,20 @@ def train_model(X_train, y_train, X_val, y_val, encoder):
 			num_boost_round=30, 
 			evals=[(val, 'validation')], 
 			early_stopping_rounds=10, 
-			verbose_eval=10
+			# verbose_eval=10
 		)
 
 		y_pred = booster.predict(val)
 		rmse = root_mean_squared_error(y_val, y_pred)
-		mlflow.log_metric('rmse', rmse)
+		mlflow.log_metric('rmse_val', rmse)
 
-		mlflow.sklearn.log_model(encoder, artifact_path="artifacts")
-		mlflow.xgboost.log_model(booster, artifact_path="artifacts")
+		joblib.dump(encoder, 'encoder.joblib')
+		mlflow.log_artifact('encoder.joblib', artifact_path="preprocessing")
+		mlflow.xgboost.log_model(booster, artifact_path="models")
 
 		return run.info.run_id
 
+@task
 def run(year, month):
 	df_train = read_dataframe(year, month)
 
@@ -84,7 +86,16 @@ def run(year, month):
 	print(f"MLflow run_id: {run_id}")
 	return run_id
 
-if __name__ == "__main__":
+# By default, if your flow contains multiple independent tasks, Prefect will attempt to run them concurrently
+# using the ConcurrentTaskRunner. This is efficient for I/O-bound or parallelizable workloads.
+# To enforce strict sequential execution (e.g. for debugging or when tasks must run in order), 
+# explicitly set the task runner to SequentialTaskRunner:
+# @flow(task_runner=SequentialTaskRunner())
+@flow
+def main():
+	mlflow.set_tracking_uri("sqlite:///mlflow.db")
+	mlflow.set_experiment("nyc-taxi-experiment")
+	print("Tracking URI:", mlflow.get_tracking_uri())
 	parser = argparse.ArgumentParser(description='Train a model to predict taxi trip duration.')
 	parser.add_argument('--year', type=int, required=True, help='Year of the data to train on')
 	parser.add_argument('--month', type=int, required=True, help='Month of the data to train on')
@@ -95,35 +106,6 @@ if __name__ == "__main__":
 	with open('run_id.txt', 'w') as f:
 		f.write(run_id)
 
+if __name__ == "__main__":
+	main()
 
-# Now, we have an ML pipeline; even though we didn't use any
-# workflow orchestrator here So some
-# things that can happen is um let's say u
-# network is down and we cannot read the
-# file So
-# um in order to uh deal with this problem
-# we need to d to to add some sort of
-# retrial mechanism right
-# or I don't know what else could can go
-# wrong or for example here again network
-# is down and we cannot log the parameter
-# so we need again to add some retrial
-# mechanism here we don't want to
-# implement it ourselves so we can uh
-# relate we can rely on um workflow
-# extensation tool to do it for us So if
-# it sees that uh read data frame fails it
-# would just re-execute it and then maybe
-# if it uh executes it three times and all
-# three times fails that it fails the
-# entire job Um so yeah we have the
-# foundation ready to actually use a
-# workflow orchestrator if we want but if
-# we don't we already have a training
-# pipeline that we can just execute and
-# get the model Okay so that's it And um
-# um yeah right now in the next video um
-# so if you're watching this in 2025
-# uh we don't have a designated special
-# orchestrator for this year for this
-# cohort Uh which means that you can
