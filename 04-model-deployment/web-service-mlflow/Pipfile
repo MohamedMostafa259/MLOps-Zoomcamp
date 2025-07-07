@@ -11,6 +11,10 @@ pandas = "*"
 gunicorn = "*"
 mlflow = "*"
 
+# we installed the requests library as a development dependency so only when we develop 
+# we will have this dependency but when we deploy this to production this dependency 
+# will not be installed (pipenv install --dev requests). We will have this dev dependency 
+# on our computer for developers for people who work on this model but when we deploy it, it will not be there.
 [dev-packages]
 requests = "*"
 
