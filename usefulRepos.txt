@@ -1,0 +1,14 @@
+https://github.com/BPrasad123/MLOps_Zoomcamp/tree/main
+
+---
+
+https://github.com/fonsecagabriella/ml_ops
+Notes: she has a repo for MLOps zoomcamp Project and a repo for LLM Zoomcamp as well
+
+--- 
+
+https://github.com/ayoub-berdeddouch/mlops-journey/tree/main
+
+---
+
+https://github.com/hannarud/mlops-zoomcamp-2025
